@@ -15,7 +15,7 @@ if "session_id" not in st.session_state:
 
 # --- File Paths ---
 XLSX_FILE = Path(f"counts_{st.session_state['session_id']}.xlsx")
-LOOKUP_FILE = Path("Barcode Lookup.xlsx")  # Lookup file must exist
+LOOKUP_FILE = Path("Barcode Lookup.xlsx")  # Must be present
 
 # --- Load Lookup Table ---
 @st.cache_data
@@ -32,7 +32,7 @@ lookup_by_sku = lookup_df.reset_index().set_index("SKU")
 if XLSX_FILE.exists():
     df = pd.read_excel(XLSX_FILE)
 else:
-    df = pd.DataFrame(columns=["SKU", "Counted Qty"])
+    df = pd.DataFrame(columns=["SKU", "Name", "Size", "Counted Qty"])
 
 # --- Focus Management ---
 def set_focus(field_id):
@@ -59,7 +59,7 @@ def get_excel_download(df):
 
 # --- Session State Setup ---
 if "quantity" not in st.session_state:
-    st.session_state["quantity"] = 0
+    st.session_state["quantity"] = None  # Empty by default
 
 if "reset_qty" not in st.session_state:
     st.session_state["reset_qty"] = False
@@ -72,7 +72,7 @@ if "reset_barcode" not in st.session_state:
 
 # --- Handle Resets Before Rendering Widgets ---
 if st.session_state["reset_qty"]:
-    st.session_state["quantity"] = 0
+    st.session_state["quantity"] = None
     st.session_state["reset_qty"] = False
 
 if st.session_state["reset_barcode"]:
@@ -101,30 +101,36 @@ with tab1:
     with col2:
         reset_confirm = st.checkbox("Confirm reset?")
         if st.button("🗑️ Reset Count File") and reset_confirm:
-            df = pd.DataFrame(columns=["SKU", "Counted Qty"])
+            df = pd.DataFrame(columns=["SKU", "Name", "Size", "Counted Qty"])
             df.to_excel(XLSX_FILE, index=False)
             st.success("✅ Count file has been cleared.")
             time.sleep(1.5)
             st.rerun()
 
+    set_focus("barcode")  # Reinforce focus after tool actions
+
     # --- Scan Form ---
     with st.form("scan_form"):
         entry = st.text_input("Scan or Enter Barcode or SKU", max_chars=50, key="barcode")
-        quantity = st.number_input("Quantity", min_value=0, step=1, key="quantity")
+        quantity = st.number_input("Quantity", min_value=0, step=1, format="%d", key="quantity", placeholder="")
+
         submitted = st.form_submit_button("Add to Count")
 
-    # --- Handle Submission (only if quantity > 0) ---
-    if submitted and entry and st.session_state["quantity"] > 0:
+    # --- Handle Submission ---
+    if submitted and entry and st.session_state["quantity"] is not None:
         entry = entry.strip().replace(".0", "")
         name = None
+        size = ""
         sku = None
 
         if entry in lookup_df.index:
             sku = str(lookup_df.at[entry, "SKU"])
             name = lookup_df.at[entry, "BRAND-NAME"]
+            size = lookup_df.at[entry, "SIZE"] if "SIZE" in lookup_df.columns else ""
         elif entry in lookup_by_sku.index:
             sku = entry
             name = lookup_by_sku.at[entry, "BRAND-NAME"]
+            size = lookup_by_sku.at[entry, "SIZE"] if "SIZE" in lookup_by_sku.columns else ""
         else:
             st.error("❌ Entry not found as Barcode or SKU in lookup file.")
 
@@ -135,7 +141,8 @@ with tab1:
                 df.at[idx, "Counted Qty"] += qty
                 msg = f"✅ {qty} units of **{name}** added. Running total: **{df.at[idx, 'Counted Qty']}**."
             else:
-                df = pd.concat([df, pd.DataFrame([{"SKU": sku, "Counted Qty": qty}])], ignore_index=True)
+                new_row = {"SKU": sku, "Name": name, "Size": size, "Counted Qty": qty}
+                df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
                 msg = f"✅ {qty} units of **{name}** added to the list."
 
             df.to_excel(XLSX_FILE, index=False)
@@ -149,12 +156,18 @@ with tab1:
             time.sleep(1.5)
             st.rerun()
 
-    set_focus("barcode")
+    set_focus("barcode")  # Always reinforce after submit
 
 # --- Tab 2: Scanned Items View ---
 with tab2:
     st.subheader("📋 Items Counted So Far")
     if not df.empty:
-        st.dataframe(df.sort_values("SKU").reset_index(drop=True))
+        st.data_editor(
+            df[["SKU", "Name", "Size", "Counted Qty"]].sort_values("SKU").reset_index(drop=True),
+            disabled=True,
+            hide_index=True,
+            use_container_width=True,
+            height=400
+        )
     else:
         st.info("No items have been scanned yet.")
