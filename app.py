@@ -13,6 +13,9 @@ st.set_page_config(page_title="Inventory Scanner", layout="centered")
 if "session_id" not in st.session_state:
     st.session_state["session_id"] = str(uuid.uuid4())
 
+if "session_finished" not in st.session_state:
+    st.session_state["session_finished"] = False
+
 # --- File Paths ---
 XLSX_FILE = Path(f"counts_{st.session_state['session_id']}.xlsx")
 LOOKUP_FILE = Path("Barcode Lookup.xlsx")  # Must be present
@@ -85,89 +88,123 @@ st.title("📦 Inventory Count")
 # --- Tabs for Scan View and Scanned Items ---
 tab1, tab2 = st.tabs(["🔍 Scan", "📋 Scanned Items"])
 
+# --- SCAN TAB ---
 with tab1:
-    # --- Session Tools: Download and Reset ---
-    st.subheader("Session Tools")
-    col1, col2 = st.columns([1, 1])
+    if not st.session_state["session_finished"]:
+        # --- Session Tools: Download and Reset ---
+        st.subheader("Session Tools")
+        col1, col2 = st.columns([1, 1])
 
-    with col1:
+        with col1:
+            st.download_button(
+                label="⬇️ Download My Count File",
+                data=get_excel_download(df),
+                file_name=f"my_inventory_count_{st.session_state['session_id']}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+        with col2:
+            reset_confirm = st.checkbox("Confirm reset?")
+            if st.button("🗑️ Reset Count File") and reset_confirm:
+                df = pd.DataFrame(columns=["SKU", "Name", "Size", "Counted Qty"])
+                df.to_excel(XLSX_FILE, index=False)
+                st.success("✅ Count file has been cleared.")
+                time.sleep(1.5)
+                st.rerun()
+
+        set_focus("barcode")  # Reinforce focus after tool actions
+
+        # --- Scan Form ---
+        with st.form("scan_form"):
+            entry = st.text_input("Scan or Enter Barcode or SKU", max_chars=50, key="barcode")
+            quantity = st.number_input("Quantity", min_value=0, step=1, format="%d", key="quantity", placeholder="")
+
+            submitted = st.form_submit_button("Add to Count")
+
+        # --- Handle Submission ---
+        if submitted and entry and st.session_state["quantity"] is not None:
+            entry = entry.strip().replace(".0", "")
+            name = None
+            size = ""
+            sku = None
+
+            if entry in lookup_df.index:
+                sku = str(lookup_df.at[entry, "SKU"])
+                name = lookup_df.at[entry, "BRAND-NAME"]
+                size = lookup_df.at[entry, "SIZE"] if "SIZE" in lookup_df.columns else ""
+            elif entry in lookup_by_sku.index:
+                sku = entry
+                name = lookup_by_sku.at[entry, "BRAND-NAME"]
+                size = lookup_by_sku.at[entry, "SIZE"] if "SIZE" in lookup_by_sku.columns else ""
+            else:
+                st.error("❌ Entry not found as Barcode or SKU in lookup file.")
+
+            if sku:
+                qty = st.session_state["quantity"]
+                if sku in df["SKU"].values:
+                    idx = df[df["SKU"] == sku].index[0]
+                    df.at[idx, "Counted Qty"] += qty
+                    msg = f"✅ {qty} units of **{name}** added. Running total: **{df.at[idx, 'Counted Qty']}**."
+                else:
+                    new_row = {"SKU": sku, "Name": name, "Size": size, "Counted Qty": qty}
+                    df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+                    msg = f"✅ {qty} units of **{name}** added to the list."
+
+                df.to_excel(XLSX_FILE, index=False)
+                st.success(msg)
+
+                components.html("""<audio autoplay><source src='https://www.soundjay.com/buttons/sounds/beep-07.mp3' type='audio/mpeg'></audio>""", height=0)
+
+                # Set reset flags
+                st.session_state["reset_qty"] = True
+                st.session_state["reset_barcode"] = True
+                time.sleep(1.5)
+                st.rerun()
+
+        set_focus("barcode")  # Always reinforce after submit
+
+        # --- Finish Session Button ---
+        st.markdown("---")
+        if st.button("✅ Finish Session"):
+            st.session_state["session_finished"] = True
+            st.success("Session Completed!")
+            time.sleep(1)
+            st.rerun()
+
+    else:
+        # --- AFTER SESSION FINISHED ---
+        st.header("✅ Thank You!")
+        st.success("Your inventory count session is complete.")
+
         st.download_button(
-            label="⬇️ Download My Count File",
+            label="⬇️ Download My Final Count File",
             data=get_excel_download(df),
             file_name=f"my_inventory_count_{st.session_state['session_id']}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
-    with col2:
-        reset_confirm = st.checkbox("Confirm reset?")
-        if st.button("🗑️ Reset Count File") and reset_confirm:
-            df = pd.DataFrame(columns=["SKU", "Name", "Size", "Counted Qty"])
-            df.to_excel(XLSX_FILE, index=False)
-            st.success("✅ Count file has been cleared.")
-            time.sleep(1.5)
+        if st.button("🔄 Start New Count"):
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
             st.rerun()
 
-    set_focus("barcode")  # Reinforce focus after tool actions
-
-    # --- Scan Form ---
-    with st.form("scan_form"):
-        entry = st.text_input("Scan or Enter Barcode or SKU", max_chars=50, key="barcode")
-        quantity = st.number_input("Quantity", min_value=0, step=1, format="%d", key="quantity", placeholder="")
-
-        submitted = st.form_submit_button("Add to Count")
-
-    # --- Handle Submission ---
-    if submitted and entry and st.session_state["quantity"] is not None:
-        entry = entry.strip().replace(".0", "")
-        name = None
-        size = ""
-        sku = None
-
-        if entry in lookup_df.index:
-            sku = str(lookup_df.at[entry, "SKU"])
-            name = lookup_df.at[entry, "BRAND-NAME"]
-            size = lookup_df.at[entry, "SIZE"] if "SIZE" in lookup_df.columns else ""
-        elif entry in lookup_by_sku.index:
-            sku = entry
-            name = lookup_by_sku.at[entry, "BRAND-NAME"]
-            size = lookup_by_sku.at[entry, "SIZE"] if "SIZE" in lookup_by_sku.columns else ""
-        else:
-            st.error("❌ Entry not found as Barcode or SKU in lookup file.")
-
-        if sku:
-            qty = st.session_state["quantity"]
-            if sku in df["SKU"].values:
-                idx = df[df["SKU"] == sku].index[0]
-                df.at[idx, "Counted Qty"] += qty
-                msg = f"✅ {qty} units of **{name}** added. Running total: **{df.at[idx, 'Counted Qty']}**."
-            else:
-                new_row = {"SKU": sku, "Name": name, "Size": size, "Counted Qty": qty}
-                df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-                msg = f"✅ {qty} units of **{name}** added to the list."
-
-            df.to_excel(XLSX_FILE, index=False)
-            st.success(msg)
-
-            components.html("""<audio autoplay><source src='https://www.soundjay.com/buttons/sounds/beep-07.mp3' type='audio/mpeg'></audio>""", height=0)
-
-            # Set reset flags
-            st.session_state["reset_qty"] = True
-            st.session_state["reset_barcode"] = True
-            time.sleep(1.5)
-            st.rerun()
-
-    set_focus("barcode")  # Always reinforce after submit
-
-# --- Tab 2: Scanned Items View ---
+# --- SCANNED ITEMS TAB ---
 with tab2:
     st.subheader("📋 Items Counted So Far")
     if not df.empty:
-        st.data_editor(
+        updated_df = st.data_editor(
             df[["SKU", "Name", "Size", "Counted Qty"]].sort_values("SKU").reset_index(drop=True),
-            disabled=True,
+            disabled=False,  # Allow edits
             hide_index=True,
             use_container_width=True,
-            height=400
+            height=400,
+            num_rows="dynamic"
         )
+
+        # Update original df if guest made changes
+        if not updated_df.equals(df[["SKU", "Name", "Size", "Counted Qty"]].sort_values("SKU").reset_index(drop=True)):
+            df = updated_df
+            df.to_excel(XLSX_FILE, index=False)
+
     else:
         st.info("No items have been scanned yet.")
