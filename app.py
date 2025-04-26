@@ -3,14 +3,19 @@ import pandas as pd
 from pathlib import Path
 from io import BytesIO
 import time
+import uuid
 import streamlit.components.v1 as components
 
 # --- Page Configuration ---
 st.set_page_config(page_title="Inventory Scanner", layout="centered")
 
+# --- Session Setup: Assign a Unique ID per User ---
+if "session_id" not in st.session_state:
+    st.session_state["session_id"] = str(uuid.uuid4())
+
 # --- File Paths ---
-XLSX_FILE = Path("counts.xlsx")
-LOOKUP_FILE = Path("Barcode Lookup.xlsx")  # Must be present in repo/deployment
+XLSX_FILE = Path(f"counts_{st.session_state['session_id']}.xlsx")
+LOOKUP_FILE = Path("Barcode Lookup.xlsx")  # Lookup file must exist
 
 # --- Load Lookup Table ---
 @st.cache_data
@@ -23,7 +28,7 @@ def load_lookup():
 lookup_df = load_lookup()
 lookup_by_sku = lookup_df.reset_index().set_index("SKU")
 
-# --- Load or Initialize Counts ---
+# --- Load or Initialize User-Specific Counts ---
 if XLSX_FILE.exists():
     df = pd.read_excel(XLSX_FILE)
 else:
@@ -89,7 +94,7 @@ with tab1:
         st.download_button(
             label="⬇️ Download My Count File",
             data=get_excel_download(df),
-            file_name="my_inventory_count.xlsx",
+            file_name=f"my_inventory_count_{st.session_state['session_id']}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
