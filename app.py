@@ -23,7 +23,7 @@ LOOKUP_FILE = Path("Barcode Lookup.xlsx")  # Must be present
 # --- Load Lookup Table ---
 @st.cache_data
 def load_lookup():
-    df = pd.read_excel(LOOKUP_FILE)
+    df = pd.read_excel(LOOKUP_FILE, dtype = str)
     df["UPC"] = df["UPC"].astype(str).str.strip().str.replace(".0", "", regex=False)
     df["SKU"] = df["SKU"].astype(str).str.strip()
     return df.set_index("UPC")
@@ -33,7 +33,7 @@ lookup_by_sku = lookup_df.reset_index().set_index("SKU")
 
 # --- Load or Initialize User-Specific Counts ---
 if XLSX_FILE.exists():
-    df = pd.read_excel(XLSX_FILE)
+    df = pd.read_excel(XLSX_FILE, dtype = str)
 else:
     df = pd.DataFrame(columns=["SKU", "Name", "Size", "Counted Qty"])
 
