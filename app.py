@@ -33,7 +33,14 @@ lookup_by_sku = lookup_df.reset_index().set_index("SKU")
 
 # --- Load or Initialize User-Specific Counts ---
 if XLSX_FILE.exists():
-    df = pd.read_excel(XLSX_FILE, dtype = str)
+    df = pd.read_excel(XLSX_FILE, dtype=str)
+    # Ensure quantity column is numeric for arithmetic operations
+    if "Counted Qty" in df.columns:
+        df["Counted Qty"] = (
+            pd.to_numeric(df["Counted Qty"], errors="coerce")
+            .fillna(0)
+            .astype(int)
+        )
 else:
     df = pd.DataFrame(columns=["SKU", "Name", "Size", "Counted Qty"])
 
